@@ -8,6 +8,8 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
 
+import os
+from pathlib import Path
 from utils.document_loader import DocumentLoader
 from utils.vector_store import VectorStore
 
@@ -33,8 +35,23 @@ def initialize_papers_router(db_path: str, collection_name: str, data_dir: str):
         data_dir: Path to data directory with PDFs
     """
     global document_loader, vector_store
+    # Use the db_path provided by main.py (single source of truth, already absolute)
     document_loader = DocumentLoader(data_dir=data_dir)
     vector_store = VectorStore(db_path=db_path, collection_name=collection_name)
+
+    # Debug prints to validate the exact DB path and collection state
+    try:
+        print("[PAPERS ROUTER] CWD:", os.getcwd())
+        print("[PAPERS ROUTER] DB PATH:", vector_store.db_path)
+        try:
+            print("[PAPERS ROUTER] COLLECTION NAME:", vector_store.collection_name)
+            print("[PAPERS ROUTER] COLLECTION COUNT:", vector_store.collection.count())
+        except Exception as e:
+            print("[PAPERS ROUTER] Failed to get collection count:", e)
+    except Exception:
+        # Best-effort diagnostics; do not break startup on logging failure
+        pass
+
     logger.info("Papers router initialized")
 
 

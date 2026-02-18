@@ -7,7 +7,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import chromadb
-from chromadb.config import Settings
+# use PersistentClient for disk persistence
 from sentence_transformers import SentenceTransformer
 
 # Configure logging
@@ -29,7 +29,7 @@ class VectorStore:
     
     def __init__(
         self,
-        db_path: str = "./vector_db",
+        db_path: str,
         collection_name: str = "research_papers",
         embedding_model: str = "all-MiniLM-L6-v2"
     ):
@@ -41,21 +41,16 @@ class VectorStore:
             collection_name: Name of the collection to work with
             embedding_model: Name of the sentence-transformer model
         """
-        self.db_path = Path(db_path)
+        # enforce absolute resolved path for DB
+        self.db_path = Path(db_path).resolve()
         self.db_path.mkdir(parents=True, exist_ok=True)
         
         self.collection_name = collection_name
         
-        # Initialize ChronaDB with persistent client
-        settings = Settings(
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=str(self.db_path),
-            anonymized_telemetry=False
-        )
-        
-        self.client = chromadb.Client(settings)
-        logger.info(f"ChromaDB client initialized with path: {self.db_path}")
-        
+        # ✅ Use PersistentClient to ensure on-disk persistence
+        self.client = chromadb.PersistentClient(path=str(self.db_path))
+        logger.info(f"[VectorStore] Using DB Path: {self.db_path}")
+
         # Get or create collection
         self.collection = self.client.get_or_create_collection(
             name=collection_name,
@@ -79,9 +74,17 @@ class VectorStore:
             List of embedding vectors
         """
         try:
-            embeddings = self.embedding_model.encode(texts, convert_to_list=True)
+            # Newer SentenceTransformer.encode may return a numpy array and
+            # does not accept `convert_to_list`. Convert to list explicitly.
+            embeddings = self.embedding_model.encode(texts)
+            try:
+                # If it's a numpy array
+                embeddings_list = embeddings.tolist()
+            except Exception:
+                embeddings_list = list(embeddings)
+
             logger.info(f"Generated embeddings for {len(texts)} text(s)")
-            return embeddings
+            return embeddings_list
         except Exception as e:
             logger.error(f"Error generating embeddings: {str(e)}")
             raise
@@ -157,6 +160,7 @@ class VectorStore:
         Returns:
             List of similar documents with scores
         """
+        
         try:
             # Check if collection has documents
             collection_count = self.collection.count()
@@ -164,8 +168,12 @@ class VectorStore:
                 logger.warning("Collection is empty, no documents to query")
                 return []
             
-            # Generate query embedding
-            query_embedding = self.embedding_model.encode(query, convert_to_list=True)
+            # Generate query embedding (encode returns array; make plain list)
+            query_embedding = self.embedding_model.encode([query])
+            try:
+                query_embedding = query_embedding.tolist()[0]
+            except Exception:
+                query_embedding = list(query_embedding)[0]
             
             # Query collection
             results = self.collection.query(
