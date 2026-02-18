@@ -1,0 +1,81 @@
+# Python virtual environment
+venv/
+env/
+ENV/
+
+# IDE and Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Testing
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Vector Database
+vector_db/
+*.db
+*.sqlite
+
+# Data
+data/*.pdf
+data/temp/
+
+# Logs
+*.log
+logs/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Project specific
+temp/
+uploads/
+downloads/
+output/
+
+# IDE
+.vscode/settings.json
+.vscode/launch.json
