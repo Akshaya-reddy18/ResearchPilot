@@ -71,17 +71,4 @@ def initialize_chat_router(db_path: str, collection_name: str, groq_api_key: str
     # Create a ResearchAgent configured to use the specified DB/collection
     agent = ResearchAgent(db_path=db_path, collection_name=collection_name)
 
-    # Debug prints to validate DB path and collection consistency
-    try:
-        print("[CHAT ROUTER] CWD:", os.getcwd())
-        print("[CHAT ROUTER] DB PATH:", agent.vector_store.db_path)
-        try:
-            print("[CHAT ROUTER] COLLECTION NAME:", agent.vector_store.collection_name)
-            print("[CHAT ROUTER] COLLECTION COUNT:", agent.vector_store.collection.count())
-        except Exception as e:
-            print("[CHAT ROUTER] Failed to get collection count:", e)
-    except Exception:
-        # Best-effort diagnostics; do not break startup on logging failure
-        pass
-
     logger.info("Chat router initialized with ResearchAgent")

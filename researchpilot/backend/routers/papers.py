@@ -39,19 +39,6 @@ def initialize_papers_router(db_path: str, collection_name: str, data_dir: str):
     document_loader = DocumentLoader(data_dir=data_dir)
     vector_store = VectorStore(db_path=db_path, collection_name=collection_name)
 
-    # Debug prints to validate the exact DB path and collection state
-    try:
-        print("[PAPERS ROUTER] CWD:", os.getcwd())
-        print("[PAPERS ROUTER] DB PATH:", vector_store.db_path)
-        try:
-            print("[PAPERS ROUTER] COLLECTION NAME:", vector_store.collection_name)
-            print("[PAPERS ROUTER] COLLECTION COUNT:", vector_store.collection.count())
-        except Exception as e:
-            print("[PAPERS ROUTER] Failed to get collection count:", e)
-    except Exception:
-        # Best-effort diagnostics; do not break startup on logging failure
-        pass
-
     logger.info("Papers router initialized")
 
 
@@ -86,6 +73,83 @@ class IngestionResponse(BaseModel):
 
 
 # Endpoints
+
+@router.post("/upload")
+async def upload_pdf(file: UploadFile = File(...)) -> Dict[str, Any]:
+    """
+    Upload a PDF file to the data directory and ingest it into the vector store.
+    
+    This endpoint:
+    1. Saves the uploaded PDF to the data directory
+    2. Loads and chunks the PDF
+    3. Generates embeddings
+    4. Stores chunks in ChromaDB
+    
+    Args:
+        file: PDF file to upload
+        
+    Returns:
+        Dictionary with upload and ingestion status
+    """
+    try:
+        if not document_loader or not vector_store:
+            raise HTTPException(status_code=500, detail="Router not initialized")
+        
+        # Validate file type
+        if not file.filename.endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="Only PDF files are supported")
+        
+        # Save file to data directory
+        data_dir = Path(document_loader.data_dir)
+        file_path = data_dir / file.filename
+        
+        # Handle duplicate filenames
+        counter = 1
+        original_name = file.filename
+        while file_path.exists():
+            name_parts = original_name.rsplit('.', 1)
+            file_path = data_dir / f"{name_parts[0]}_{counter}.{name_parts[1]}"
+            counter += 1
+        
+        # Write file
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        
+        logger.info(f"Saved uploaded file: {file_path}")
+        
+        # Load and process the uploaded PDF
+        text = document_loader.load_pdf(str(file_path))
+        metadata = {
+            "source": file_path.name,
+            "file_path": str(file_path),
+            "document_type": "pdf"
+        }
+        chunks = document_loader.chunk_text(text, metadata)
+        
+        if not chunks:
+            raise HTTPException(status_code=500, detail="Failed to extract text from PDF")
+        
+        # Ingest into vector store
+        result = vector_store.ingest_documents(chunks)
+        
+        if result["status"] == "success":
+            logger.info(f"Successfully uploaded and ingested {file_path.name}: {result['count']} chunks")
+            return {
+                "status": "success",
+                "message": f"File uploaded and ingested successfully",
+                "filename": file_path.name,
+                "documents_ingested": result["count"]
+            }
+        else:
+            raise HTTPException(status_code=500, detail=result["message"])
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error during file upload: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
 
 @router.post("/ingest", response_model=IngestionResponse)
 async def ingest_documents() -> Dict[str, Any]:

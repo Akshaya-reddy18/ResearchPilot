@@ -14,12 +14,19 @@ class ResearchAgent:
         """
         self.vector_store = VectorStore(db_path=db_path, collection_name=collection_name)
 
-        # Production: do not emit debug prints here
-
         try:
             self.llm = GroqClient()
-        except Exception:
+            # Get the model name from the client instance
+            self.model_name = self.llm.model
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"GroqClient initialized successfully with model: {self.model_name}")
+        except Exception as e:
             self.llm = None
+            self.model_name = None
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"GroqClient initialization failed: {str(e)}. AI responses will be disabled.")
 
     def analyze_topic(self, query: str, top_k: int = 5, use_context: bool = True) -> Dict[str, Any]:
         """
@@ -35,13 +42,9 @@ class ResearchAgent:
         """
         results: List[Dict[str, Any]] = []
 
-        # Production: avoid debug prints about DB/collection
-
         # Retrieve context if requested
         if use_context:
             results = self.vector_store.query_similar_documents(query, top_k=top_k)
-
-        # Production: avoid printing retrieved results
 
         # If no context is found and use_context was requested, fall back to empty context
         if use_context and not results:
@@ -70,31 +73,69 @@ Return output in this structure:
 5. Future Scope
 """
 
-        # Call LLM if available, otherwise return prompt snippet as fallback
+        # Call LLM if available, otherwise return helpful message
         if self.llm:
             response = self.llm.generate_response(prompt)
-        else:
-            response = "Groq client not configured. Set GROQ_API_KEY in .env to enable LLM responses.\n\n" + (prompt[:2000])
-
-        # Normalize response to plain text analysis. Handle SDK response objects or plain strings.
-        analysis = ""
-        try:
-            # groq SDK-style object
-            if hasattr(response, "choices"):
-                analysis = response.choices[0].message.content.strip()
-            elif isinstance(response, dict) and "choices" in response:
-                analysis = response["choices"][0]["message"]["content"].strip()
-            elif isinstance(response, str):
+            # Extract analysis content from response
+            if isinstance(response, str):
                 analysis = response.strip()
             else:
                 analysis = str(response).strip()
-        except Exception:
-            analysis = str(response).strip()
+        else:
+            # Return a structured response even without LLM
+            if results:
+                # We have context but no LLM - provide basic analysis
+                analysis = f"""1. Executive Summary
+
+Based on the {len(results)} relevant document chunks retrieved from your research library, this topic appears in your indexed documents. However, to generate a comprehensive AI-powered analysis, please configure the Groq API key.
+
+2. Key Findings
+
+{len(results)} relevant document chunks were found related to your query.
+
+3. Methodology Comparison
+
+To enable AI analysis, add GROQ_API_KEY to your backend .env file.
+
+4. Research Gaps
+
+Configure Groq API to unlock full research analysis capabilities.
+
+5. Future Scope
+
+Once GROQ_API_KEY is configured, the system will provide detailed AI-generated research analysis using the Llama 3.3 70B model."""
+            else:
+                # No context and no LLM
+                analysis = f"""1. Executive Summary
+
+No relevant documents were found in your research library for this topic. Please upload and ingest PDF documents first, then configure the Groq API key for AI-powered analysis.
+
+2. Key Findings
+
+- No documents indexed yet, or query doesn't match existing documents
+- Groq API key not configured
+
+3. Methodology Comparison
+
+To get started:
+1. Upload PDF documents via the Upload page
+2. Ingest them into the vector database
+3. Add GROQ_API_KEY to backend/.env file
+
+4. Research Gaps
+
+System is ready but needs:
+- Document ingestion
+- Groq API configuration
+
+5. Future Scope
+
+Once configured, the system will provide intelligent research analysis combining your documents with AI reasoning."""
 
         return {
             "query": query,
             "analysis": analysis,
             "source_chunks_used": len(results),
             "top_k": top_k,
-            "model": "llama3-70b-8192"
+            "model": self.model_name
         }

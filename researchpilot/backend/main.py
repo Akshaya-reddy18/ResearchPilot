@@ -24,15 +24,11 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-# ---------------------------------------------------------------------------
-# Single source of truth for important filesystem paths
-# ---------------------------------------------------------------------------
+# Single source of truth for DB path and data directory
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# Vector DB directory – ALWAYS absolute, never relative, and shared everywhere
 DB_PATH = os.path.abspath(os.path.join(BASE_DIR, "vector_db"))
 
-# Data directory – resolve to absolute path as well
+# Data directory - resolve to absolute path
 _env_data_dir = os.getenv("DATA_DIR")
 if _env_data_dir:
     # If user supplied a relative path, resolve it from BASE_DIR to avoid
@@ -76,20 +72,29 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 60)
     
     try:
-        # Get configuration (db_path is single-source-of-truth here)
+        # Get configuration from environment (single source of truth for db_path)
         logger.info(f"WORKING DIRECTORY: {os.getcwd()}")
         logger.info(f"FINAL VECTOR DB PATH: {DB_PATH}")
         logger.info(f"FINAL DATA DIR PATH: {DATA_DIR}")
-
-        db_path = DB_PATH  # absolute, never overridden by CWD
-        collection_name = os.getenv("CHROMA_COLLECTION_NAME", "research_papers")
-        groq_api_key = os.getenv("GROQ_API_KEY", None)
         
-        # Initialize papers router (shares same absolute DB + collection)
-        papers.initialize_papers_router(db_path, collection_name, DATA_DIR)
+        # Check Groq API key status
+        groq_api_key = os.getenv("GROQ_API_KEY", None)
+        if groq_api_key:
+            # Mask the key for logging (show first 8 chars only)
+            masked_key = groq_api_key[:8] + "..." if len(groq_api_key) > 8 else "***"
+            logger.info(f"GROQ_API_KEY found: {masked_key}")
+        else:
+            logger.warning("GROQ_API_KEY not found in environment. AI responses will be disabled.")
+        
+        db_path = DB_PATH
+        collection_name = os.getenv("CHROMA_COLLECTION_NAME", "research_papers")
+        data_dir = DATA_DIR  # Use the absolute path defined at module level
+        
+        # Initialize papers router
+        papers.initialize_papers_router(db_path, collection_name, data_dir)
         logger.info("✓ Papers router initialized")
         
-        # Initialize chat router (shares same absolute DB + collection)
+        # Initialize chat router
         chat.initialize_chat_router(db_path, collection_name, groq_api_key)
         logger.info("✓ Chat router initialized")
         
@@ -123,19 +128,45 @@ app = FastAPI(
 )
 
 # Configure CORS middleware
-cors_origins = os.getenv("CORS_ORIGINS", '["http://localhost:3000", "http://localhost:8080"]')
-if isinstance(cors_origins, str):
-    import json
-    cors_origins = json.loads(cors_origins)
+# Allow all localhost ports for development (Vite can use different ports)
+# In production, specify exact origins
+cors_origins_env = os.getenv("CORS_ORIGINS")
+if cors_origins_env:
+    # If CORS_ORIGINS is set, use it
+    if isinstance(cors_origins_env, str):
+        import json
+        cors_origins = json.loads(cors_origins_env)
+    else:
+        cors_origins = cors_origins_env
+else:
+    # Default: Allow all localhost and 127.0.0.1 origins for development
+    cors_origins = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:8080",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "http://127.0.0.1:8080",
+    ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["*"],  # Allow all methods including OPTIONS for preflight
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
 logger.info(f"CORS enabled for origins: {cors_origins}")
+
+# Add explicit OPTIONS handler for preflight requests (backup)
+@app.options("/{full_path:path}")
+async def options_handler(full_path: str):
+    """Handle OPTIONS preflight requests"""
+    return {"message": "OK"}
 
 # Include routers
 app.include_router(papers.router)
@@ -176,9 +207,8 @@ async def root() -> Dict[str, Any]:
             "Sentence transformers embeddings"
         ],
         "environment": {
-            # Always report resolved absolute paths so clients see the real locations
-            "vector_db": DB_PATH,
-            "data_directory": DATA_DIR,
+            "vector_db": os.getenv("VECTOR_DB_PATH", "./vector_db"),
+            "data_directory": os.getenv("DATA_DIR", "./data"),
             "embedding_model": os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
         }
     }
@@ -225,9 +255,8 @@ async def api_status() -> Dict[str, Any]:
             "groq_integration": False  # Placeholder for future
         },
         "configuration": {
-            # Use the same absolute paths the application itself is using
-            "vector_db_path": DB_PATH,
-            "data_dir": DATA_DIR,
+            "vector_db_path": os.getenv("VECTOR_DB_PATH", "./vector_db"),
+            "data_dir": os.getenv("DATA_DIR", "./data"),
             "collection_name": os.getenv("CHROMA_COLLECTION_NAME", "research_papers"),
             "embedding_model": os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2"),
             "chunk_size": int(os.getenv("MAX_CHUNK_SIZE", "1000")),
